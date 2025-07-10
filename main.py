@@ -22,18 +22,21 @@ async def handle_post(update: Update, context):
     if update.channel_post and not update.channel_post.reply_to_message:
         channel_id = update.channel_post.chat.id
         message_id = update.channel_post.message_id
-        # Проверяем, есть ли связанная дискуссионная группа
-        discussion_group_id = update.channel_post.linked_chat_id
+        # Получаем ID дискуссионной группы из переменной окружения
+        discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
         if discussion_group_id:
-            # Отправляем комментарий в дискуссионную группу
-            await context.bot.send_message(
-                chat_id=discussion_group_id,
-                text="Ждем Edem PW! 🚀",
-                reply_to_message_id=message_id
-            )
-            logger.info(f"Commented on post {message_id} in discussion group {discussion_group_id}")
+            try:
+                # Отправляем комментарий в дискуссионную группу
+                await context.bot.send_message(
+                    chat_id=discussion_group_id,
+                    text="Отличный пост! 🚀",
+                    reply_to_message_id=message_id
+                )
+                logger.info(f"Commented on post {message_id} in discussion group {discussion_group_id}")
+            except Exception as e:
+                logger.error(f"Failed to send message to discussion group {discussion_group_id}: {e}")
         else:
-            logger.warning(f"No linked discussion group found for channel {channel_id}")
+            logger.warning("No DISCUSSION_GROUP_ID environment variable set")
 
 # Эндпоинт для вебхука
 @app.post("/{token}")
