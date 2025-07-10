@@ -1,84 +1,53 @@
-import asyncio
-from telegram.ext import Application, MessageHandler, filters
-from telegram import Update
-import os
-import logging
-import uvicorn
-from fastapi import FastAPI, Request, Response
-
-# Настройка логирования
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Инициализация FastAPI
-app = FastAPI()
-
-# Глобальная переменная для хранения Application
-application = None
-
-# Функция для обработки новых постов в канале
-async def handle_post(update: Update, context):
-    # Проверяем, что сообщение из канала и не является ответом
-    if update.channel_post and not update.channel_post.reply_to_message:
-        channel_id = str(update.channel_post.chat.id)
-        expected_channel_id = os.getenv("CHANNEL_ID")
-        # Проверяем, что сообщение из основного канала
-        if expected_channel_id and channel_id == expected_channel_id:
-            message_id = update.channel_post.message_id
-            # Получаем ID дискуссионной группы из переменной окружения
-            discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
-            if discussion_group_id:
-                try:
-                    # Отправляем комментарий в дискуссионную группу
-                    await context.bot.send_message(
-                        chat_id=discussion_group_id,
-                        text="Ждем Edem PW! 🚀",
-                        reply_to_message_id=message_id
-                    )
-                    logger.info(f"Commented on post {message_id} in discussion group {discussion_group_id} from channel {channel_id}")
-                except Exception as e:
-                    logger.error(f"Failed to send message to discussion group {discussion_group_id}: {e}")
-            else:
-                logger.warning("No DISCUSSION_GROUP_ID environment variable set")
-        else:
-            logger.info(f"Ignored message from chat_id {channel_id}, expected {expected_channel_id}")
-
-# Эндпоинт для вебхука
-@app.post("/{token}")
-async def webhook(token: str, request: Request):
-    # Проверяем, что токен совпадает
-    if token != os.getenv("BOT_TOKEN").split(":")[-1]:
-        return Response(status_code=403)
+if token_suffix != expected_token_suffix:
+        logger.warning(f"Unauthorized webhook attempt with token suffix: {token_suffix}. Expected: {expected_token_suffix}")
+        return Response(status_code=403) # 403 Forbidden, если токен не совпадает
     
-    # Получаем данные из запроса
+    # Получаем JSON данные из тела HTTP-запроса.
     json_data = await request.json()
-    update = Update.de_json(json_data, application.bot)
-    
-    # Обрабатываем обновление
-    await application.process_update(update)
-    return Response(status_code=200)
+    logger.info(f"Received webhook payload: {json_data.get('update_id', 'N/A')}") # Лог: Получен payload вебхука
 
-# Основная асинхронная функция для запуска бота
+    # Преобразуем JSON данные в объект Update, понятный python-telegram-bot.
+    # application.bot должен быть инициализирован к этому моменту.
+    try:
+        update = Update.de_json(json_data, application.bot)
+    except Exception as e:
+        logger.error(f"Failed to parse webhook JSON into Update object: {e}")
+        return Response(status_code=400) # 400 Bad Request, если JSON невалидный для Update
+
+    # Передаем обновление в Application для обработки зарегистрированными обработчиками.
+    await application.process_update(update)
+    logger.info("Webhook processed successfully.") # Лог: Вебхук успешно обработан
+    return Response(status_code=200) # 200 OK, чтобы Telegram знал, что мы получили обновление
+
+# --- Основная асинхронная функция для запуска бота ---
 async def main():
-    global application
-    # Получаем токен из переменной окружения
+    global application # Объявляем, что будем использовать глобальную переменную application
+
+    # Получаем токен бота из переменных окружения.
     token = os.getenv("BOT_TOKEN")
     if not token:
+        logger.critical("BOT_TOKEN environment variable is not set. Bot cannot start.")
         raise ValueError("BOT_TOKEN environment variable is not set")
     
-    # Инициализируем приложение
+    # Инициализируем Application (основной объект бота).
     application = Application.builder().token(token).build()
     
-    # Инициализируем Application
+    # Инициализируем внутренние компоненты Application.
     await application.initialize()
     
-    # Добавляем обработчик для сообщений в канале
+    # Добавляем обработчик для сообщений, которые являются постами в канале.
     application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, handle_post))
     
-    # Запускаем FastAPI сервер
-    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    # Запускаем FastAPI сервер с Uvicorn.
+    # "0.0.0.0" позволяет серверу слушать все доступные сетевые интерфейсы.
+    # Порт берется из переменной окружения PORT, по умолчанию 8000.
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"Starting Uvicorn server on host 0.0.0.0 and port {port}")
+    config = uvicorn.Config(app, host="0.0.0.0", port=port)
     server = uvicorn.Server(config)
     await server.serve()
 
-if __name__ == "__main__":
+# --- Точка входа в программу ---
+if name == "main":
+    # Запускаем основную асинхронную функцию.
     asyncio.run(main())
