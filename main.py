@@ -22,13 +22,18 @@ async def handle_post(update: Update, context):
     if update.channel_post and not update.channel_post.reply_to_message:
         channel_id = update.channel_post.chat.id
         message_id = update.channel_post.message_id
-        # Отправляем комментарий под постом
-        await context.bot.send_message(
-            chat_id=channel_id,
-            text="Отличный пост! 🚀",
-            reply_to_message_id=message_id
-        )
-        logger.info(f"Commented on post {message_id} in channel {channel_id}")
+        # Проверяем, есть ли связанная дискуссионная группа
+        discussion_group_id = update.channel_post.linked_chat_id
+        if discussion_group_id:
+            # Отправляем комментарий в дискуссионную группу
+            await context.bot.send_message(
+                chat_id=discussion_group_id,
+                text="Ждем Edem PW! 🚀",
+                reply_to_message_id=message_id
+            )
+            logger.info(f"Commented on post {message_id} in discussion group {discussion_group_id}")
+        else:
+            logger.warning(f"No linked discussion group found for channel {channel_id}")
 
 # Эндпоинт для вебхука
 @app.post("/{token}")
