@@ -7,5 +7,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Используем shell-формат для CMD, чтобы избежать проблем с интерпретацией
+# Используем shell-формат для CMD
 CMD python main.py
