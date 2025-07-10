@@ -1,3 +1,4 @@
+import asyncio
 from telegram.ext import Application, MessageHandler, filters
 from telegram import Update
 import os
@@ -44,8 +45,8 @@ async def webhook(token: str, request: Request):
     await application.process_update(update)
     return Response(status_code=200)
 
-# Основная функция для запуска бота
-def main():
+# Основная асинхронная функция для запуска бота
+async def main():
     global application
     # Получаем токен из переменной окружения
     token = os.getenv("BOT_TOKEN")
@@ -55,11 +56,16 @@ def main():
     # Инициализируем приложение
     application = Application.builder().token(token).build()
     
+    # Инициализируем Application
+    await application.initialize()
+    
     # Добавляем обработчик для сообщений в канале
     application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, handle_post))
     
     # Запускаем FastAPI сервер
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    server = uvicorn.Server(config)
+    await server.serve()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
