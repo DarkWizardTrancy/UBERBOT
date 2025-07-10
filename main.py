@@ -24,7 +24,7 @@ async def handle_post(update: Update, context):
         # Отправляем комментарий под постом
         await context.bot.send_message(
             chat_id=channel_id,
-            text="Ждем открытие Edem PW pwismylife.com! 🚀",
+            text="Отличный пост! 🚀",
             reply_to_message_id=message_id
         )
         logger.info(f"Commented on post {message_id} in channel {channel_id}")
@@ -56,7 +56,7 @@ def main():
     application = Application.builder().token(token).build()
     
     # Добавляем обработчик для сообщений в канале
-    application.add_handler(MessageHandler(filters.CHANNEL_POST, handle_post))
+    application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, handle_post))
     
     # Запускаем FastAPI сервер
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
