@@ -20,23 +20,28 @@ application = None
 async def handle_post(update: Update, context):
     # Проверяем, что сообщение из канала и не является ответом
     if update.channel_post and not update.channel_post.reply_to_message:
-        channel_id = update.channel_post.chat.id
-        message_id = update.channel_post.message_id
-        # Получаем ID дискуссионной группы из переменной окружения
-        discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
-        if discussion_group_id:
-            try:
-                # Отправляем комментарий в дискуссионную группу
-                await context.bot.send_message(
-                    chat_id=discussion_group_id,
-                    text="Отличный пост! 🚀",
-                    reply_to_message_id=message_id
-                )
-                logger.info(f"Commented on post {message_id} in discussion group {discussion_group_id}")
-            except Exception as e:
-                logger.error(f"Failed to send message to discussion group {discussion_group_id}: {e}")
+        channel_id = str(update.channel_post.chat.id)
+        expected_channel_id = os.getenv("CHANNEL_ID")
+        # Проверяем, что сообщение из основного канала
+        if expected_channel_id and channel_id == expected_channel_id:
+            message_id = update.channel_post.message_id
+            # Получаем ID дискуссионной группы из переменной окружения
+            discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
+            if discussion_group_id:
+                try:
+                    # Отправляем комментарий в дискуссионную группу
+                    await context.bot.send_message(
+                        chat_id=discussion_group_id,
+                        text="Ждем Edem PW! 🚀",
+                        reply_to_message_id=message_id
+                    )
+                    logger.info(f"Commented on post {message_id} in discussion group {discussion_group_id} from channel {channel_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send message to discussion group {discussion_group_id}: {e}")
+            else:
+                logger.warning("No DISCUSSION_GROUP_ID environment variable set")
         else:
-            logger.warning("No DISCUSSION_GROUP_ID environment variable set")
+            logger.info(f"Ignored message from chat_id {channel_id}, expected {expected_channel_id}")
 
 # Эндпоинт для вебхука
 @app.post("/{token}")
