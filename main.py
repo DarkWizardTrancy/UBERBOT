@@ -43,7 +43,7 @@ async def handle_forwarded_post_in_discussion(update: Update, context):
 
         # Проверяем, что оно переслано из нашего целевого канала
         if expected_channel_id and forwarded_from_channel_id == expected_channel_id:
-            message_to_reply_id = message.message_id # Это ID пересланного сообщения в дискуссионной группе!
+            message_to_reply_id = message.message_id
 
             try:
                 # Отправляем комментарий в дискуссионную группу, отвечая на пересланный пост
@@ -159,7 +159,7 @@ async def main():
     application.add_handler(CommandHandler("servers", servers))
     application.add_handler(CommandHandler("partners", partners))
     
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 10000))
     logger.info(f"Starting Uvicorn server on host 0.0.0.0 and port {port}")
     config = uvicorn.Config(app, host="0.0.0.0", port=port)
     server = uvicorn.Server(config)
