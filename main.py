@@ -3,7 +3,7 @@ import os
 import logging
 import uvicorn
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters
+from telegram.ext import Application, MessageHandler, filters, CommandHandler
 from fastapi import FastAPI, Request, Response
 
 # --- Настройка логирования ---
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 application = None
 
-# --- НОВАЯ функция для обработки пересланных постов в дискуссионной группе ---
+# --- Функция для обработки пересланных постов в дискуссионной группе ---
 async def handle_forwarded_post_in_discussion(update: Update, context):
     logger.info(f"Received an update in discussion group: {update.update_id}")
 
@@ -41,7 +41,7 @@ async def handle_forwarded_post_in_discussion(update: Update, context):
 
         logger.info(f"Detected forwarded message from channel {forwarded_from_channel_id} in discussion group. Expected channel: {expected_channel_id}")
 
-        # Проверяем, что оно переслано именно из нашего целевого канала
+        # Проверяем, что оно переслано из нашего целевого канала
         if expected_channel_id and forwarded_from_channel_id == expected_channel_id:
             message_to_reply_id = message.message_id # Это ID пересланного сообщения в дискуссионной группе!
 
@@ -60,7 +60,64 @@ async def handle_forwarded_post_in_discussion(update: Update, context):
     else:
         logger.info("Message in discussion group is not a forwarded message from a channel. Skipping.")
 
-# --- Эндпоинт для вебхука (без изменений) ---
+# --- Функция для команды /site ---
+async def site(update: Update, context):
+    current_chat_id = str(update.message.chat.id)
+    discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
+
+    if not discussion_group_id or current_chat_id != discussion_group_id:
+        logger.info(f"Ignored /site command from chat_id {current_chat_id}, not the expected discussion group {discussion_group_id}")
+        return
+
+    try:
+        await update.message.reply_text("Наш любимый форум: https://pwismylife.com/")
+        logger.info(f"Sent /site response in discussion group {discussion_group_id}")
+    except Exception as e:
+        logger.error(f"Failed to send /site response in discussion group {discussion_group_id}: {e}")
+
+# --- Функция для команды /servers ---
+async def servers(update: Update, context):
+    current_chat_id = str(update.message.chat.id)
+    discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
+
+    if not discussion_group_id or current_chat_id != discussion_group_id:
+        logger.info(f"Ignored /servers command from chat_id {current_chat_id}, not the expected discussion group {discussion_group_id}")
+        return
+
+    try:
+        await update.message.reply_text(
+            "Сервера достойные для просмотра:\n\n"
+            "Edem New Born: https://edem.pw/\n"
+            "Asgard PW: https://asgard.pw/\n"
+            "Revolution PW: https://revolutionpw.online/\n"
+            "ComeBack PW: https://comeback.pw/"
+        )
+        logger.info(f"Sent /servers response in discussion group {discussion_group_id}")
+    except Exception as e:
+        logger.error(f"Failed to send /servers response in discussion group {discussion_group_id}: {e}")
+
+# --- Функция для команды /partners ---
+async def partners(update: Update, context):
+    current_chat_id = str(update.message.chat.id)
+    discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
+
+    if not discussion_group_id or current_chat_id != discussion_group_id:
+        logger.info(f"Ignored /partners command from chat_id {current_chat_id}, not the expected discussion group {discussion_group_id}")
+        return
+
+    try:
+        await update.message.reply_text(
+            "Партнерские/Каналы соратников:\n\n"
+            "RuFree News: @RuFreeNews\n"
+            "ChaoPersik Team: @chaopersikpw\n"
+            "GastTV: @gasttv\n"
+            "Ubermench PW: @ubermensch_pw"
+        )
+        logger.info(f"Sent /partners response in discussion group {discussion_group_id}")
+    except Exception as e:
+        logger.error(f"Failed to send /partners response in discussion group {discussion_group_id}: {e}")
+
+# --- Эндпоинт для вебхука ---
 @app.post("/{token_suffix}")
 async def webhook(token_suffix: str, request: Request):
     expected_token_suffix = os.getenv("BOT_TOKEN", "").split(":")[-1]
@@ -96,13 +153,11 @@ async def main():
     application = Application.builder().token(token).build()
     await application.initialize()
     
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ: УДАЛЯЕМ старый обработчик CHANNEL_POST ---
-    # application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, handle_post))
-
-    # --- ДОБАВЛЯЕМ НОВЫЙ обработчик для СООБЩЕНИЙ (включая пересланные) в группе ---
-    # filters.ALL будет ловить все сообщения. Затем внутри handle_forwarded_post_in_discussion
-    # мы будем фильтровать их по chat_id и наличию forward_from_chat.
+    # --- Добавляем обработчики ---
     application.add_handler(MessageHandler(filters.ALL, handle_forwarded_post_in_discussion))
+    application.add_handler(CommandHandler("site", site))
+    application.add_handler(CommandHandler("servers", servers))
+    application.add_handler(CommandHandler("partners", partners))
     
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Starting Uvicorn server on host 0.0.0.0 and port {port}")
@@ -112,4 +167,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
