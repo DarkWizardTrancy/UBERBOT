@@ -154,7 +154,8 @@ async def main():
     await application.initialize()
     
     # --- Добавляем обработчики ---
-    application.add_handler(MessageHandler(filters.ALL, handle_forwarded_post_in_discussion))
+    # Используем ~filters.COMMAND, чтобы MessageHandler не перехватывал команды
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_forwarded_post_in_discussion))
     application.add_handler(CommandHandler("site", site))
     application.add_handler(CommandHandler("servers", servers))
     application.add_handler(CommandHandler("partners", partners))
