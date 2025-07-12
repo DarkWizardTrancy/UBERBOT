@@ -168,6 +168,11 @@ async def count_messages(update: Update, context):
 # --- Функция для обработки сообщений в личных чатах ---
 async def handle_private_message(update: Update, context):
     current_chat_id = str(update.message.chat.id)
+    # Проверяем, ожидает ли бот диапазон для рандомайзера
+    if context.user_data.get("awaiting_random_range", False):
+        logger.info(f"Ignored private message from chat_id {current_chat_id}, awaiting random range")
+        return
+
     logger.info(f"Received private message from chat_id {current_chat_id}")
 
     try:
@@ -197,6 +202,7 @@ async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Функция для обработки диапазона рандомайзера ---
 async def handle_random_range(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_random_range", False):
+        logger.info(f"Ignored message from chat_id {str(update.message.chat.id)}, not awaiting random range")
         return
 
     current_chat_id = str(update.message.chat.id)
@@ -412,10 +418,10 @@ async def main():
     application.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.GROUPS, handle_forwarded_post_in_discussion))
     # Обработчик для подсчёта сообщений в группе
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & filters.ChatType.GROUPS, count_messages))
+    # Обработчик для диапазона рандомайзера (должен быть перед handle_private_message)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_random_range))
     # Обработчик для сообщений в личных чатах
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_private_message))
-    # Обработчик для диапазона рандомайзера
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_random_range))
     # Команды
     application.add_handler(CommandHandler("site", site))
     application.add_handler(CommandHandler("servers", servers))
