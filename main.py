@@ -112,7 +112,26 @@ async def count_messages(update: Update, context):
 
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
-    message_type = message.content_type
+
+    # Определяем тип сообщения для логов
+    message_type = "unknown"
+    if message.text:
+        message_type = "text"
+    elif message.photo:
+        message_type = "photo"
+    elif message.sticker:
+        message_type = "sticker"
+    elif message.video:
+        message_type = "video"
+    elif message.document:
+        message_type = "document"
+    elif message.audio:
+        message_type = "audio"
+    elif message.voice:
+        message_type = "voice"
+    elif message.video_note:
+        message_type = "video_note"
+
     logger.info(f"Processing message from user {user_id} ({username}), type: {message_type}")
 
     try:
