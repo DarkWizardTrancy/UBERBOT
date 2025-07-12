@@ -2,9 +2,10 @@ import asyncio
 import os
 import logging
 import sqlite3
+import random
 import uvicorn
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, CommandHandler
+from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
 from fastapi import FastAPI, Request, Response
 
 # --- Настройка логирования ---
@@ -28,7 +29,7 @@ def init_db():
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 message_count INTEGER DEFAULT 0,
-                rank TEXT DEFAULT 'Новенький'
+                rank TEXT DEFAULT 'Странник Эфира'
             )
         ''')
         conn.commit()
@@ -41,17 +42,17 @@ def init_db():
 # --- Функция для получения ранга по количеству сообщений ---
 def get_rank(message_count):
     if message_count >= 2400:
-        return "Ранг 5"
+        return "Бессмертный Пангу"
     elif message_count >= 1200:
-        return "Ранг 4"
+        return "Повелитель Стихий"
     elif message_count >= 600:
-        return "Ранг 3"
+        return "Архонт Света"
     elif message_count >= 300:
-        return "Ранг 2"
+        return "Мастер Дао"
     elif message_count >= 150:
-        return "Ранг 1"
+        return "Адепт Небес"
     else:
-        return "Новенький"
+        return "Странник Эфира"
 
 # --- Функция для обработки пересланных постов в дискуссионной группе ---
 async def handle_forwarded_post_in_discussion(update: Update, context):
@@ -96,7 +97,7 @@ async def handle_forwarded_post_in_discussion(update: Update, context):
     else:
         logger.info("Message in discussion group is not a forwarded message from a channel. Skipping.")
 
-# --- Функция для подсчёта сообщений пользователей ---
+# --- Функция для подсчёта сообщений пользователей в группе ---
 async def count_messages(update: Update, context):
     message = update.message
     if not message or not message.from_user:
@@ -163,6 +164,82 @@ async def count_messages(update: Update, context):
         logger.error(f"Failed to update message count for user {user_id}: {e}")
     finally:
         conn.close()
+
+# --- Функция для обработки сообщений в личных чатах ---
+async def handle_private_message(update: Update, context):
+    current_chat_id = str(update.message.chat.id)
+    logger.info(f"Received private message from chat_id {current_chat_id}")
+
+    try:
+        await update.message.reply_text(
+            "Привет! 🎲 Ты можешь воспользоваться нашим рандомайзером по команде /random"
+        )
+        logger.info(f"Sent randomizer prompt to user in chat_id {current_chat_id}")
+    except Exception as e:
+        logger.error(f"Failed to send randomizer prompt in chat_id {current_chat_id}: {e}")
+
+# --- Функция для команды /random ---
+async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    current_chat_id = str(update.message.chat.id)
+    if update.message.chat.type != "private":
+        logger.info(f"Ignored /random command from chat_id {current_chat_id}, not a private chat")
+        return
+
+    try:
+        await update.message.reply_text(
+            "🎲 Введи диапазон чисел в формате <start>-<end>, например, '1-3'"
+        )
+        context.user_data["awaiting_random_range"] = True
+        logger.info(f"Prompted user for random range in chat_id {current_chat_id}")
+    except Exception as e:
+        logger.error(f"Failed to send random range prompt in chat_id {current_chat_id}: {e}")
+
+# --- Функция для обработки диапазона рандомайзера ---
+async def handle_random_range(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_random_range", False):
+        return
+
+    current_chat_id = str(update.message.chat.id)
+    if update.message.chat.type != "private":
+        logger.info(f"Ignored range message from chat_id {current_chat_id}, not a private chat")
+        return
+
+    range_text = update.message.text.strip()
+    logger.info(f"Received range '{range_text}' from user in chat_id {current_chat_id}")
+
+    try:
+        # Проверяем формат диапазона
+        if "-" not in range_text:
+            await update.message.reply_text(
+                "❌ Неверный формат. Введи диапазон в формате <start>-<end>, например, '1-3'"
+            )
+            logger.info(f"Invalid range format '{range_text}' from chat_id {current_chat_id}")
+            return
+
+        start, end = map(str.strip, range_text.split("-", 1))
+        start = int(start)
+        end = int(end)
+
+        if start > end:
+            await update.message.reply_text(
+                "❌ Начало диапазона должно быть меньше или равно концу. Попробуй снова, например, '1-3'"
+            )
+            logger.info(f"Invalid range: start {start} > end {end} from chat_id {current_chat_id}")
+            return
+
+        random_number = random.randint(start, end)
+        await update.message.reply_text(f"🎲 Случайное число: {random_number}")
+        logger.info(f"Generated random number {random_number} for range {start}-{end} in chat_id {current_chat_id}")
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Неверный формат чисел. Используй целые числа, например, '1-3'"
+        )
+        logger.info(f"Invalid number format in range '{range_text}' from chat_id {current_chat_id}")
+    except Exception as e:
+        await update.message.reply_text("❌ Ошибка при генерации числа. Попробуй снова.")
+        logger.error(f"Failed to generate random number for range '{range_text}' in chat_id {current_chat_id}: {e}")
+    finally:
+        context.user_data["awaiting_random_range"] = False
 
 # --- Функция для команды /site ---
 async def site(update: Update, context):
@@ -238,7 +315,8 @@ async def help_command(update: Update, context):
             "/partners - Показать список партнёрских каналов\n"
             "/help - Показать это сообщение\n"
             "/ping - Проверить статус бота\n"
-            "/rank - Показать ваш текущий ранг и количество сообщений"
+            "/rank - Показать ваш текущий ранг и количество сообщений\n"
+            "/random - Сгенерировать случайное число (в личных сообщениях)"
         )
         logger.info(f"Sent /help response in discussion group {discussion_group_id}")
     except Exception as e:
@@ -282,13 +360,13 @@ async def rank(update: Update, context):
             message_count, rank = result
             response = f"👤 Пользователь: {username}\n📊 Количество сообщений: {message_count}\n🏆 Ранг: {rank}"
         else:
-            response = f"👤 Пользователь: {username}\n📊 Количество сообщений: 0\n🏆 Ранг: Новенький"
+            response = f"👤 Пользователь: {username}\n📊 Количество сообщений: 0\n🏆 Ранг: Странник Эфира"
 
         await update.message.reply_text(response)
         logger.info(f"Sent /rank response for user {user_id} in discussion group {discussion_group_id}")
     except Exception as e:
         logger.error(f"Failed to send /rank response in discussion group {discussion_group_id}: {e}")
-        await update.message.reply_text("❌ Ошибка при получении ранга. Попробуйте позже.")
+        await update.message.reply_text("❌ Ошибка при получении ранга. Попробуй позже.")
 
 # --- Эндпоинт для вебхука ---
 @app.post("/{token_suffix}")
@@ -332,8 +410,12 @@ async def main():
     # --- Добавляем обработчики ---
     # Обработчик для пересланных постов из канала
     application.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.GROUPS, handle_forwarded_post_in_discussion))
-    # Обработчик для подсчёта сообщений (все сообщения, кроме команд)
+    # Обработчик для подсчёта сообщений в группе
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & filters.ChatType.GROUPS, count_messages))
+    # Обработчик для сообщений в личных чатах
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_private_message))
+    # Обработчик для диапазона рандомайзера
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_random_range))
     # Команды
     application.add_handler(CommandHandler("site", site))
     application.add_handler(CommandHandler("servers", servers))
@@ -341,6 +423,7 @@ async def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("ping", ping))
     application.add_handler(CommandHandler("rank", rank))
+    application.add_handler(CommandHandler("random", random_command))
     
     port = int(os.getenv("PORT", 10000))
     logger.info(f"Starting Uvicorn server on host 0.0.0.0 and port {port}")
