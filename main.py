@@ -20,18 +20,23 @@ application = None
 
 # --- Инициализация базы данных SQLite ---
 def init_db():
-    conn = sqlite3.connect('bot.db')
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            message_count INTEGER DEFAULT 0,
-            rank TEXT DEFAULT 'Новенький'
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('/app/bot.db', check_same_thread=False)
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                message_count INTEGER DEFAULT 0,
+                rank TEXT DEFAULT 'Новенький'
+            )
+        ''')
+        conn.commit()
+        logger.info("Database initialized successfully.")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+    finally:
+        conn.close()
 
 # --- Функция для получения ранга по количеству сообщений ---
 def get_rank(message_count):
@@ -107,32 +112,38 @@ async def count_messages(update: Update, context):
 
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
+    message_type = message.content_type
+    logger.info(f"Processing message from user {user_id} ({username}), type: {message_type}")
 
-    conn = sqlite3.connect('bot.db')
-    c = conn.cursor()
+    try:
+        conn = sqlite3.connect('/app/bot.db', check_same_thread=False)
+        c = conn.cursor()
 
-    # Проверяем, есть ли пользователь в базе
-    c.execute("SELECT message_count FROM users WHERE user_id = ?", (user_id,))
-    result = c.fetchone()
+        # Проверяем, есть ли пользователь в базе
+        c.execute("SELECT message_count FROM users WHERE user_id = ?", (user_id,))
+        result = c.fetchone()
 
-    if result:
-        message_count = result[0] + 1
-        new_rank = get_rank(message_count)
-        c.execute(
-            "UPDATE users SET message_count = ?, rank = ?, username = ? WHERE user_id = ?",
-            (message_count, new_rank, username, user_id)
-        )
-    else:
-        message_count = 1
-        new_rank = get_rank(message_count)
-        c.execute(
-            "INSERT INTO users (user_id, username, message_count, rank) VALUES (?, ?, ?, ?)",
-            (user_id, username, message_count, new_rank)
-        )
+        if result:
+            message_count = result[0] + 1
+            new_rank = get_rank(message_count)
+            c.execute(
+                "UPDATE users SET message_count = ?, rank = ?, username = ? WHERE user_id = ?",
+                (message_count, new_rank, username, user_id)
+            )
+        else:
+            message_count = 1
+            new_rank = get_rank(message_count)
+            c.execute(
+                "INSERT INTO users (user_id, username, message_count, rank) VALUES (?, ?, ?, ?)",
+                (user_id, username, message_count, new_rank)
+            )
 
-    conn.commit()
-    conn.close()
-    logger.info(f"Updated message count for user {user_id} ({username}): {message_count}, rank: {new_rank}")
+        conn.commit()
+        logger.info(f"Updated message count for user {user_id} ({username}): {message_count}, rank: {new_rank}")
+    except Exception as e:
+        logger.error(f"Failed to update message count for user {user_id}: {e}")
+    finally:
+        conn.close()
 
 # --- Функция для команды /site ---
 async def site(update: Update, context):
@@ -241,23 +252,24 @@ async def rank(update: Update, context):
     user_id = update.message.from_user.id
     username = update.message.from_user.username or update.message.from_user.first_name
 
-    conn = sqlite3.connect('bot.db')
-    c = conn.cursor()
-    c.execute("SELECT message_count, rank FROM users WHERE user_id = ?", (user_id,))
-    result = c.fetchone()
-    conn.close()
-
-    if result:
-        message_count, rank = result
-        response = f"👤 Пользователь: {username}\n📊 Количество сообщений: {message_count}\n🏆 Ранг: {rank}"
-    else:
-        response = f"👤 Пользователь: {username}\n📊 Количество сообщений: 0\n🏆 Ранг: Новенький"
-
     try:
+        conn = sqlite3.connect('/app/bot.db', check_same_thread=False)
+        c = conn.cursor()
+        c.execute("SELECT message_count, rank FROM users WHERE user_id = ?", (user_id,))
+        result = c.fetchone()
+        conn.close()
+
+        if result:
+            message_count, rank = result
+            response = f"👤 Пользователь: {username}\n📊 Количество сообщений: {message_count}\n🏆 Ранг: {rank}"
+        else:
+            response = f"👤 Пользователь: {username}\n📊 Количество сообщений: 0\n🏆 Ранг: Новенький"
+
         await update.message.reply_text(response)
         logger.info(f"Sent /rank response for user {user_id} in discussion group {discussion_group_id}")
     except Exception as e:
         logger.error(f"Failed to send /rank response in discussion group {discussion_group_id}: {e}")
+        await update.message.reply_text("❌ Ошибка при получении ранга. Попробуйте позже.")
 
 # --- Эндпоинт для вебхука ---
 @app.post("/{token_suffix}")
@@ -299,9 +311,11 @@ async def main():
     await application.initialize()
     
     # --- Добавляем обработчики ---
-    # Используем ~filters.COMMAND, чтобы MessageHandler не перехватывал команды
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_forwarded_post_in_discussion))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, count_messages))
+    # Обработчик для пересланных постов из канала
+    application.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.GROUPS, handle_forwarded_post_in_discussion))
+    # Обработчик для подсчёта сообщений (все сообщения, кроме команд)
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & filters.ChatType.GROUPS, count_messages))
+    # Команды
     application.add_handler(CommandHandler("site", site))
     application.add_handler(CommandHandler("servers", servers))
     application.add_handler(CommandHandler("partners", partners))
