@@ -10,6 +10,9 @@ from telegram.ext import Application, MessageHandler, filters, CommandHandler, C
 from fastapi import FastAPI, Request, Response
 from urllib.parse import quote
 
+# Очистка дефолтных заголовков requests
+requests.sessions.HTTPAdapter().default_headers.clear()
+
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -76,7 +79,10 @@ async def post_to_xenforo(title: str, message: str, user_id: int, username: str)
             "message": f"{message}\n\nPosted by {username} (Telegram ID: {user_id})",
             "node_id": str(XENFORO_FORUM_ID)
         }
-        response = requests.post(f"{XENFORO_API_URL}/threads", headers=headers, data=data)
+        logger.info(f"Sending POST request to {XENFORO_API_URL}/threads with headers: {headers}, data: {data}")
+        session = requests.Session()
+        response = session.post(f"{XENFORO_API_URL}/threads", headers=headers, data=data)
+        logger.info(f"POST response status: {response.status_code}, headers: {response.headers}, body: {response.text}")
         response.raise_for_status()
         logger.info(f"Successfully posted to XenForo: {title}")
         return True
@@ -93,9 +99,12 @@ async def link_to_xenforo(forum_username: str, user_id: int, chat_id: str) -> bo
         headers = {
             "XF-Api-Key": XENFORO_API_KEY
         }
-        # Поиск пользователя
         encoded_username = quote(forum_username)
-        response = requests.get(f"{XENFORO_API_URL}/users/find-name?name={encoded_username}", headers=headers)
+        url = f"{XENFORO_API_URL}/users/find-name?name={encoded_username}"
+        logger.info(f"Sending GET request to {url} with headers: {headers}")
+        session = requests.Session()
+        response = session.get(url, headers=headers)
+        logger.info(f"GET response status: {response.status_code}, headers: {response.headers}, body: {response.text}")
         response.raise_for_status()
         user_data = response.json()
         logger.info(f"Find user response: {user_data}")
@@ -103,12 +112,13 @@ async def link_to_xenforo(forum_username: str, user_id: int, chat_id: str) -> bo
             logger.info(f"User {forum_username} not found from chat_id {chat_id}")
             return False
         forum_user_id = user_data["user"]["user_id"]
-        # Обновление поля telegram_id
         headers["Content-Type"] = "application/x-www-form-urlencoded"
         data = {
             "custom_fields[telegram_id]": str(user_id)
         }
-        response = requests.post(f"{XENFORO_API_URL}/users/{forum_user_id}", headers=headers, data=data)
+        logger.info(f"Sending POST request to {XENFORO_API_URL}/users/{forum_user_id} with headers: {headers}, data: {data}")
+        response = session.post(f"{XENFORO_API_URL}/users/{forum_user_id}", headers=headers, data=data)
+        logger.info(f"POST response status: {response.status_code}, headers: {response.headers}, body: {response.text}")
         response.raise_for_status()
         logger.info(f"Linked Telegram ID {user_id} to forum user {forum_username} (ID: {forum_user_id})")
         return True
