@@ -8,6 +8,7 @@ import requests
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
 from fastapi import FastAPI, Request, Response
+from urllib.parse import quote
 
 # Настройка логирования
 logging.basicConfig(
@@ -79,8 +80,8 @@ async def post_to_xenforo(title: str, message: str, user_id: int, username: str)
         response.raise_for_status()
         logger.info(f"Successfully posted to XenForo: {title}")
         return True
-    except Exception as e:
-        logger.error(f"Failed to post to XenForo: {e}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to post to XenForo: {e}, Response: {e.response.text if e.response else 'No response'}")
         return False
 
 # Функция для привязки Telegram ID к XenForo
@@ -90,16 +91,20 @@ async def link_to_xenforo(forum_username: str, user_id: int, chat_id: str) -> bo
         return False
     try:
         headers = {
-            "XF-Api-Key": XENFORO_API_KEY,
-            "Content-Type": "application/x-www-form-urlencoded"
+            "XF-Api-Key": XENFORO_API_KEY
         }
-        response = requests.get(f"{XENFORO_API_URL}/users/find-name?name={forum_username}", headers=headers)
+        # Поиск пользователя
+        encoded_username = quote(forum_username)
+        response = requests.get(f"{XENFORO_API_URL}/users/find-name?name={encoded_username}", headers=headers)
         response.raise_for_status()
         user_data = response.json()
+        logger.info(f"Find user response: {user_data}")
         if not user_data.get("user"):
             logger.info(f"User {forum_username} not found from chat_id {chat_id}")
             return False
         forum_user_id = user_data["user"]["user_id"]
+        # Обновление поля telegram_id
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
         data = {
             "custom_fields[telegram_id]": str(user_id)
         }
@@ -107,8 +112,8 @@ async def link_to_xenforo(forum_username: str, user_id: int, chat_id: str) -> bo
         response.raise_for_status()
         logger.info(f"Linked Telegram ID {user_id} to forum user {forum_username} (ID: {forum_user_id})")
         return True
-    except Exception as e:
-        logger.error(f"Failed to link account for chat_id {chat_id}: {e}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to link account for chat_id {chat_id}: {e}, Response: {e.response.text if e.response else 'No response'}")
         return False
 
 # Обработка пересланных постов в дискуссионной группе
