@@ -5,7 +5,13 @@ import sqlite3
 import random
 import uvicorn
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    filters,
+    CommandHandler,
+    ContextTypes
+)
 from telegram.error import TelegramError
 from fastapi import FastAPI, Request, Response
 
@@ -18,11 +24,11 @@ logger = logging.getLogger(__name__)
 
 # --- Инициализация FastAPI ---
 app = FastAPI()
-application = None
+application = None # Инициализируем как None, будет установлено в main()
 
 # --- Инициализация базы данных SQLite ---
 def init_db():
-    conn = None # Инициализируем conn, чтобы он был доступен в finally
+    conn = None
     try:
         # Убедитесь, что путь '/app/bot.db' доступен для записи в контейнере Render
         conn = sqlite3.connect('/app/bot.db', check_same_thread=False)
@@ -59,35 +65,30 @@ def get_rank(message_count):
         return "Странник Эфира"
 
 # --- Функция для обработки пересланных постов в дискуссионной группе ---
-async def handle_forwarded_post_in_discussion(update: Update, context):
-    logger.info(f"Received an update in discussion group: {update.update_id}")
+async def handle_forwarded_post_in_discussion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received an update in discussion group for forwarded message: {update.update_id}")
 
     message = update.message
     if not message:
-        logger.info("Update is not a message in discussion group. Skipping.")
+        logger.info("Update is not a message in discussion group (forwarded). Skipping.")
         return
 
-    # Проверяем, что сообщение пришло из ожидаемой дискуссионной группы
     current_chat_id = str(message.chat.id)
     discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
 
     if not discussion_group_id or current_chat_id != discussion_group_id:
-        logger.info(f"Ignored message from chat_id {current_chat_id}, not the expected discussion group {discussion_group_id}")
+        logger.info(f"Ignored forwarded message from chat_id {current_chat_id}, not the expected discussion group {discussion_group_id}")
         return
 
-    # Проверяем, что это пересланное сообщение и переслано из канала
     if message.forward_from_chat and message.forward_from_chat.type == "channel":
         forwarded_from_channel_id = str(message.forward_from_chat.id)
         expected_channel_id = os.getenv("CHANNEL_ID")
 
         logger.info(f"Detected forwarded message from channel {forwarded_from_channel_id} in discussion group. Expected channel: {expected_channel_id}")
 
-        # Проверяем, что оно переслано из нашего целевого канала
         if expected_channel_id and forwarded_from_channel_id == expected_channel_id:
             message_to_reply_id = message.message_id
-
             try:
-                # Отправляем комментарий в дискуссионную группу, отвечая на пересланный пост
                 await context.bot.send_message(
                     chat_id=discussion_group_id,
                     text="Ждем Edem PW! 🚀",
@@ -102,23 +103,22 @@ async def handle_forwarded_post_in_discussion(update: Update, context):
         logger.info("Message in discussion group is not a forwarded message from a channel. Skipping.")
 
 # --- Функция для подсчёта сообщений пользователей в группе ---
-async def count_messages(update: Update, context):
+async def count_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     if not message or not message.from_user:
-        logger.info("Update is not a message or has no user. Skipping message count.")
+        logger.info("Update is not a message or has no user in count_messages. Skipping.")
         return
 
     current_chat_id = str(message.chat.id)
     discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
 
     if not discussion_group_id or current_chat_id != discussion_group_id:
-        logger.info(f"Ignored message for counting from chat_id {current_chat_id}, not the expected discussion group {discussion_group_id}")
+        logger.info(f"Ignored message for counting from chat_id {current_chat_id}, not the expected discussion group {discussion_group_id}. Message text: '{message.text[:50] if message.text else 'N/A'}'")
         return
 
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
 
-    # Определяем тип сообщения для логов (улучшено)
     message_type = "unknown"
     if message.text:
         message_type = "text"
@@ -136,16 +136,17 @@ async def count_messages(update: Update, context):
         message_type = "voice"
     elif message.video_note:
         message_type = "video_note"
-    elif message.new_chat_members: # Добавлено для новых участников
+    elif message.new_chat_members:
         message_type = "new_chat_members"
-    elif message.left_chat_member: # Добавлено для покинувших участников
+    elif message.left_chat_member:
         message_type = "left_chat_member"
-    elif message.pinned_message: # Добавлено для закрепленных сообщений
+    elif message.pinned_message:
         message_type = "pinned_message"
+    elif message.animation: # Добавлено для гифок
+        message_type = "animation"
 
-    logger.info(f"Processing message from user {user_id} ({username}), type: {message_type}")
+    logger.info(f"Processing message for counting from user {user_id} ({username}), type: {message_type}, chat: {current_chat_id}")
 
-    # Не считаем сообщения о входе/выходе из чата для ранга
     if message_type in ["new_chat_members", "left_chat_member", "pinned_message"]:
         logger.info(f"Skipping message count for service message type: {message_type}")
         return
@@ -155,7 +156,6 @@ async def count_messages(update: Update, context):
         conn = sqlite3.connect('/app/bot.db', check_same_thread=False)
         c = conn.cursor()
 
-        # Проверяем, есть ли пользователь в базе
         c.execute("SELECT message_count FROM users WHERE user_id = ?", (user_id,))
         result = c.fetchone()
 
@@ -175,31 +175,61 @@ async def count_messages(update: Update, context):
             )
 
         conn.commit()
-        logger.info(f"Updated message count for user {user_id} ({username}): {message_count}, rank: {new_rank}")
+        logger.info(f"Updated message count for user {user_id} ({username}): {message_count}, rank: {new_rank} in chat {current_chat_id}")
     except Exception as e:
-        logger.error(f"Failed to update message count for user {user_id}: {e}")
+        logger.error(f"Failed to update message count for user {user_id} in chat {current_chat_id}: {e}", exc_info=True)
     finally:
         if conn:
             conn.close()
 
 # --- Функция для обработки сообщений в личных чатах ---
-async def handle_private_message(update: Update, context):
+async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_chat_id = str(update.message.chat.id)
-    # Проверяем, ожидает ли бот диапазон для рандомайзера
-    # Этот обработчик должен быть после handle_random_range, если filter.TEXT & ~filter.COMMAND используется
+    # Этот обработчик должен быть после handle_random_range,
+    # т.к. handle_random_range использует user_data
     if context.user_data.get("awaiting_random_range", False):
-        logger.info(f"Ignored private message from chat_id {current_chat_id}, awaiting random range")
+        logger.info(f"Ignored private message from chat_id {current_chat_id}, awaiting random range.")
         return
 
-    logger.info(f"Received private message from chat_id {current_chat_id}")
+    logger.info(f"Received private message from chat_id {current_chat_id}. Message: '{update.message.text[:50] if update.message.text else 'N/A'}'")
 
     try:
         await update.message.reply_text(
-            "Привет! 🎲 Ты можешь воспользоваться нашим рандомайзером по команде /random"
+            "Привет! Я бот EdemPW. Используй /help, чтобы узнать, что я умею."
         )
-        logger.info(f"Sent randomizer prompt to user in chat_id {current_chat_id}")
+        logger.info(f"Sent welcome message to user in chat_id {current_chat_id}")
     except Exception as e:
-        logger.error(f"Failed to send randomizer prompt in chat_id {current_chat_id}: {e}")
+        logger.error(f"Failed to send welcome message in chat_id {current_chat_id}: {e}")
+
+# --- Базовые команды ---
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received /start command from user {update.effective_user.id}")
+    await update.message.reply_text(
+        "Привет! Я бот для группы EdemPW. Я могу помочь с информацией, рангами и даже немного поиграть. "
+        "Используй /help, чтобы увидеть список команд."
+    )
+
+async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received /info command from user {update.effective_user.id}")
+    await update.message.reply_text(
+        "Я бот, созданный для поддержки сообщества EdemPW. "
+        "Мои функции включают подсчёт сообщений, выдачу рангов, рандомайзер и предоставление полезных ссылок."
+    )
+
+async def echo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Эта команда работает только в личных чатах
+    if update.message.chat.type != "private":
+        await update.message.reply_text("Эта команда работает только в личных сообщениях.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Пожалуйста, введите текст после команды, например: /echo Привет!")
+        return
+
+    text_to_echo = " ".join(context.args)
+    logger.info(f"Received /echo command with text: '{text_to_echo}' from user {update.effective_user.id}")
+    await update.message.reply_text(text_to_echo)
 
 # --- Функция для команды /random ---
 async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230,7 +260,6 @@ async def handle_random_range(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info(f"Received range '{range_text}' from user in chat_id {current_chat_id}")
 
     try:
-        # Проверяем формат диапазона
         if "-" not in range_text:
             await update.message.reply_text(
                 "❌ Неверный формат. Введи диапазон в формате <start>-<end>, например, '1-3'"
@@ -238,9 +267,9 @@ async def handle_random_range(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.info(f"Invalid range format '{range_text}' from chat_id {current_chat_id}")
             return
 
-        start, end = map(str.strip, range_text.split("-", 1))
-        start = int(start)
-        end = int(end)
+        start_str, end_str = map(str.strip, range_text.split("-", 1))
+        start = int(start_str)
+        end = int(end_str)
 
         if start > end:
             await update.message.reply_text(
@@ -259,12 +288,12 @@ async def handle_random_range(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info(f"Invalid number format in range '{range_text}' from chat_id {current_chat_id}")
     except Exception as e:
         await update.message.reply_text("❌ Ошибка при генерации числа. Попробуй снова.")
-        logger.error(f"Failed to generate random number for range '{range_text}' in chat_id {current_chat_id}: {e}")
+        logger.error(f"Failed to generate random number for range '{range_text}' in chat_id {current_chat_id}: {e}", exc_info=True)
     finally:
         context.user_data["awaiting_random_range"] = False
 
-# --- Функция для команды /site ---
-async def site(update: Update, context):
+# --- Функции для команд в группе ---
+async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_chat_id = str(update.message.chat.id)
     discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
 
@@ -278,8 +307,7 @@ async def site(update: Update, context):
     except Exception as e:
         logger.error(f"Failed to send /site response in discussion group {discussion_group_id}: {e}")
 
-# --- Функция для команды /servers ---
-async def servers(update: Update, context):
+async def servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_chat_id = str(update.message.chat.id)
     discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
 
@@ -299,8 +327,7 @@ async def servers(update: Update, context):
     except Exception as e:
         logger.error(f"Failed to send /servers response in discussion group {discussion_group_id}: {e}")
 
-# --- Функция для команды /partners ---
-async def partners(update: Update, context):
+async def partners(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_chat_id = str(update.message.chat.id)
     discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
 
@@ -320,32 +347,40 @@ async def partners(update: Update, context):
     except Exception as e:
         logger.error(f"Failed to send /partners response in discussion group {discussion_group_id}: {e}")
 
-# --- Функция для команды /help ---
-async def help_command(update: Update, context):
-    current_chat_id = str(update.message.chat.id)
-    discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_type = update.message.chat.type
+    user_id = update.effective_user.id
+    logger.info(f"Received /help command from user {user_id} in chat type {chat_type}")
 
-    if not discussion_group_id or current_chat_id != discussion_group_id:
-        logger.info(f"Ignored /help command from chat_id {current_chat_id}, not the expected discussion group {discussion_group_id}")
-        return
-
-    try:
+    if chat_type == "private":
         await update.message.reply_text(
-            "📋 Доступные команды:\n"
+            "📋 Доступные команды в личном чате:\n"
+            "/start - Начать взаимодействие с ботом\n"
+            "/info - Узнать информацию о боте\n"
+            "/echo <текст> - Бот повторит ваш текст\n"
+            "/random - Сгенерировать случайное число\n"
+            "/help - Показать это сообщение"
+        )
+    else: # Группа
+        discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
+        current_chat_id = str(update.message.chat.id)
+        if not discussion_group_id or current_chat_id != discussion_group_id:
+            logger.info(f"Ignored /help command in group {current_chat_id}, not the expected discussion group {discussion_group_id}")
+            return
+
+        await update.message.reply_text(
+            "📋 Доступные команды в группе:\n"
             "/site - Показать ссылку на наш любимый форум\n"
             "/servers - Показать список рекомендуемых серверов\n"
             "/partners - Показать список партнёрских каналов\n"
             "/help - Показать это сообщение\n"
             "/ping - Проверить статус бота\n"
-            "/rank - Показать ваш текущий ранг и количество сообщений\n"
-            "/random - Сгенерировать случайное число (в личных сообщениях)"
+            "/rank - Показать ваш текущий ранг и количество сообщений"
         )
-        logger.info(f"Sent /help response in discussion group {discussion_group_id}")
-    except Exception as e:
-        logger.error(f"Failed to send /help response in discussion group {discussion_group_id}: {e}")
+    logger.info(f"Sent /help response to user {user_id} in chat type {chat_type}")
 
-# --- Функция для команды /ping ---
-async def ping(update: Update, context):
+
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_chat_id = str(update.message.chat.id)
     discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
 
@@ -359,8 +394,7 @@ async def ping(update: Update, context):
     except Exception as e:
         logger.error(f"Failed to send /ping response in discussion group {discussion_group_id}: {e}")
 
-# --- Функция для команды /rank ---
-async def rank(update: Update, context):
+async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_chat_id = str(update.message.chat.id)
     discussion_group_id = os.getenv("DISCUSSION_GROUP_ID")
 
@@ -387,23 +421,20 @@ async def rank(update: Update, context):
         await update.message.reply_text(response)
         logger.info(f"Sent /rank response for user {user_id} in discussion group {discussion_group_id}")
     except Exception as e:
-        logger.error(f"Failed to send /rank response in discussion group {discussion_group_id}: {e}")
+        logger.error(f"Failed to send /rank response in discussion group {discussion_group_id}: {e}", exc_info=True)
         await update.message.reply_text("❌ Ошибка при получении ранга. Попробуй позже.")
     finally:
         if conn:
             conn.close()
 
-# Эндпоинт для проверок работоспособности Render (Health Check)
+# --- Эндпоинты FastAPI ---
 @app.get("/")
 async def health_check():
-    """Отвечает на GET-запросы по корневому пути для проверки работоспособности."""
     logger.info("Received health check GET / request. Responding 200 OK.")
     return {"status": "ok", "message": "Bot is running"}
 
-# Эндпоинт для вебхука Telegram
 @app.post("/webhook")
 async def webhook(request: Request):
-    """Принимает POST-запросы от Telegram с обновлениями."""
     global application
     if application is None:
         logger.critical("Telegram Application is not initialized. Cannot process webhook.")
@@ -431,7 +462,7 @@ async def webhook(request: Request):
         logger.error(f"Error processing update {json_data.get('update_id', 'N/A')}: {e}", exc_info=True)
         return Response(status_code=500, content=f"Internal Server Error: {e}")
 
-# Основная асинхронная функция для запуска бота
+# --- Основная функция запуска бота ---
 async def main():
     global application
     token = os.getenv("BOT_TOKEN")
@@ -454,24 +485,56 @@ async def main():
     logger.info(f"Attempting to set webhook to: {webhook_url}")
 
     try:
-        await application.bot.set_webhook(url=webhook_url)
-        logger.info("Webhook set successfully!")
+        current_webhook_info = await application.bot.get_webhook_info()
+        if current_webhook_info.url != webhook_url:
+            await application.bot.set_webhook(url=webhook_url)
+            logger.info("Webhook set successfully!")
+        else:
+            logger.info("Webhook is already set to the correct URL. Skipping.")
     except TelegramError as e:
         logger.critical(f"Failed to set webhook: {e}", exc_info=True)
         raise
 
     # --- Добавляем обработчики ---
-    application.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.GROUPS, handle_forwarded_post_in_discussion))
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & filters.ChatType.GROUPS, count_messages))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_random_range))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_private_message))
+    # Команды для любого типа чата
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("info", info_command))
+    application.add_handler(CommandHandler("echo", echo_command)) # Echo может быть в группах, но будет работать только в личных
+    application.add_handler(CommandHandler("random", random_command)) # Random только в личных
+
+    # Сообщения, ожидающие диапазона для random (приватные чаты)
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
+        handle_random_range
+    ))
+
+    # Общие текстовые сообщения в приватных чатах (должен быть после других обработчиков приватных сообщений)
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
+        handle_private_message
+    ))
+
+    # Команды и сообщения для групп (ДИСКУССИОННАЯ ГРУППА)
     application.add_handler(CommandHandler("site", site))
     application.add_handler(CommandHandler("servers", servers))
     application.add_handler(CommandHandler("partners", partners))
-    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("ping", ping))
     application.add_handler(CommandHandler("rank", rank))
-    application.add_handler(CommandHandler("random", random_command))
+
+    # Обработчик для команды /help (может быть как в приватных, так и в группах)
+    application.add_handler(CommandHandler("help", help_command))
+
+    # Обработчик для пересланных постов из канала в дискуссионной группе
+    application.add_handler(MessageHandler(
+        filters.FORWARDED & filters.ChatType.GROUPS,
+        handle_forwarded_post_in_discussion
+    ))
+
+    # Обработчик для подсчёта сообщений в группе (не команды, не форварды, не сервисные сообщения)
+    application.add_handler(MessageHandler(
+        filters.ALL & ~filters.COMMAND & ~filters.FORWARDED & filters.ChatType.GROUPS,
+        count_messages
+    ))
 
     port = int(os.getenv("PORT", 10000))
     logger.info(f"Starting Uvicorn server on host 0.0.0.0 and port {port}")
