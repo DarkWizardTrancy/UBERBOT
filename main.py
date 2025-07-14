@@ -6,6 +6,7 @@ import random
 import uvicorn
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
+from telegram.error import TelegramError # Добавлено для обработки ошибок вебхука
 from fastapi import FastAPI, Request, Response
 
 # --- Настройка логирования ---
@@ -17,11 +18,12 @@ logger = logging.getLogger(__name__)
 
 # --- Инициализация FastAPI ---
 app = FastAPI()
-application = None
+application = None # Инициализируем как None, будет установлено в main()
 
 # --- Инициализация базы данных SQLite ---
 def init_db():
     try:
+        # Убедитесь, что путь '/app/bot.db' доступен для записи в контейнере Render
         conn = sqlite3.connect('/app/bot.db', check_same_thread=False)
         c = conn.cursor()
         c.execute('''
@@ -37,7 +39,8 @@ def init_db():
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # --- Функция для получения ранга по количеству сообщений ---
 def get_rank(message_count):
@@ -114,7 +117,7 @@ async def count_messages(update: Update, context):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
 
-    # Определяем тип сообщения для логов
+    # Определяем тип сообщения для логов (улучшено)
     message_type = "unknown"
     if message.text:
         message_type = "text"
@@ -132,9 +135,21 @@ async def count_messages(update: Update, context):
         message_type = "voice"
     elif message.video_note:
         message_type = "video_note"
+    elif message.new_chat_members: # Добавлено для новых участников
+        message_type = "new_chat_members"
+    elif message.left_chat_member: # Добавлено для покинувших участников
+        message_type = "left_chat_member"
+    elif message.pinned_message: # Добавлено для закрепленных сообщений
+        message_type = "pinned_message"
 
     logger.info(f"Processing message from user {user_id} ({username}), type: {message_type}")
 
+    # Не считаем сообщения о входе/выходе из чата для ранга
+    if message_type in ["new_chat_members", "left_chat_member", "pinned_message"]:
+        logger.info(f"Skipping message count for service message type: {message_type}")
+        return
+
+    conn = None # Инициализируем conn
     try:
         conn = sqlite3.connect('/app/bot.db', check_same_thread=False)
         c = conn.cursor()
@@ -163,12 +178,14 @@ async def count_messages(update: Update, context):
     except Exception as e:
         logger.error(f"Failed to update message count for user {user_id}: {e}")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # --- Функция для обработки сообщений в личных чатах ---
 async def handle_private_message(update: Update, context):
     current_chat_id = str(update.message.chat.id)
     # Проверяем, ожидает ли бот диапазон для рандомайзера
+    # Этот обработчик должен быть после handle_random_range, если filter.TEXT & ~filter.COMMAND используется
     if context.user_data.get("awaiting_random_range", False):
         logger.info(f"Ignored private message from chat_id {current_chat_id}, awaiting random range")
         return
@@ -188,6 +205,7 @@ async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_chat_id = str(update.message.chat.id)
     if update.message.chat.type != "private":
         logger.info(f"Ignored /random command from chat_id {current_chat_id}, not a private chat")
+        await update.message.reply_text("Эта команда работает только в личных сообщениях.") # Добавлено
         return
 
     try:
@@ -201,16 +219,13 @@ async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Функция для обработки диапазона рандомайзера ---
 async def handle_random_range(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_random_range", False):
-        logger.info(f"Ignored message from chat_id {str(update.message.chat.id)}, not awaiting random range")
-        return
-
-    current_chat_id = str(update.message.chat.id)
-    if update.message.chat.type != "private":
-        logger.info(f"Ignored range message from chat_id {current_chat_id}, not a private chat")
+    # Убедитесь, что это действительно приватный чат и мы ожидаем диапазон
+    if update.message.chat.type != "private" or not context.user_data.get("awaiting_random_range", False):
+        logger.info(f"Ignored message from chat_id {str(update.message.chat.id)}, not awaiting random range in private chat.")
         return
 
     range_text = update.message.text.strip()
+    current_chat_id = str(update.message.chat.id)
     logger.info(f"Received range '{range_text}' from user in chat_id {current_chat_id}")
 
     try:
@@ -355,13 +370,13 @@ async def rank(update: Update, context):
     user_id = update.message.from_user.id
     username = update.message.from_user.username or update.message.from_user.first_name
 
+    conn = None # Инициализируем conn
     try:
         conn = sqlite3.connect('/app/bot.db', check_same_thread=False)
         c = conn.cursor()
         c.execute("SELECT message_count, rank FROM users WHERE user_id = ?", (user_id,))
         result = c.fetchone()
-        conn.close()
-
+        
         if result:
             message_count, rank = result
             response = f"👤 Пользователь: {username}\n📊 Количество сообщений: {message_count}\n🏆 Ранг: {rank}"
@@ -373,69 +388,57 @@ async def rank(update: Update, context):
     except Exception as e:
         logger.error(f"Failed to send /rank response in discussion group {discussion_group_id}: {e}")
         await update.message.reply_text("❌ Ошибка при получении ранга. Попробуй позже.")
+    finally:
+        if conn:
+            conn.close()
 
-# --- Эндпоинт для вебхука ---
-@app.post("/{token_suffix}")
-async def webhook(token_suffix: str, request: Request):
-    expected_token_suffix = os.getenv("BOT_TOKEN", "").split(":")[-1]
-    if not expected_token_suffix:
-        logger.error("BOT_TOKEN environment variable is not set correctly. Cannot validate webhook.")
-        return Response(status_code=500)
+---
 
-    if token_suffix != expected_token_suffix:
-        logger.warning(f"Unauthorized webhook attempt with token suffix: {token_suffix}. Expected: {expected_token_suffix}")
-        return Response(status_code=403)
-    
-    json_data = await request.json()
+### Эндпоинты для FastAPI
+
+Ваш бот будет принимать два типа HTTP-запросов:
+* **GET /**: Используется Render для проверки того, что ваш сервис запущен.
+* **POST /webhook**: Основной эндпоинт, куда Telegram будет отправлять обновления.
+
+```python
+# --- Эндпоинт для проверок работоспособности Render (Health Check) ---
+@app.get("/")
+async def health_check():
+    """Отвечает на GET-запросы по корневому пути для проверки работоспособности."""
+    logger.info("Received health check GET / request. Responding 200 OK.")
+    return {"status": "ok", "message": "Bot is running"}
+
+# --- Эндпоинт для вебхука Telegram ---
+@app.post("/webhook") # <--- Теперь фиксированный путь /webhook
+async def webhook(request: Request):
+    """Принимает POST-запросы от Telegram с обновлениями."""
+    # Убедитесь, что 'application' инициализировано
+    global application # Указываем, что используем глобальную переменную
+    if application is None:
+        logger.critical("Telegram Application is not initialized. Cannot process webhook.")
+        return Response(status_code=500, content="Telegram Application not ready.")
+
+    try:
+        json_data = await request.json()
+    except Exception as e:
+        logger.error(f"Failed to parse incoming JSON: {e}")
+        return Response(status_code=400, content="Bad Request: Invalid JSON")
+
+    # Использование .get('update_id', 'N/A') для безопасного логирования
     logger.info(f"Received webhook payload: {json_data.get('update_id', 'N/A')}")
 
     try:
-        update = Update.de_json(json_data, application.bot)
+        # update = Update.de_json(json_data, application.bot) - старый синтаксис
+        update = Update.de_json(data=json_data, bot=application.bot) # Новый синтаксис для telegram-bot-api
     except Exception as e:
-        logger.error(f"Failed to parse webhook JSON into Update object: {e}")
-        return Response(status_code=400)
+        logger.error(f"Failed to parse webhook JSON into Update object: {e}", exc_info=True)
+        return Response(status_code=400, content=f"Bad Request: Could not parse Update object: {e}")
 
-    await application.process_update(update)
-    logger.info("Webhook processed successfully.")
-    return Response(status_code=200)
+    try:
+        await application.process_update(update)
+        logger.info(f"Webhook processed successfully for update_id: {json_data.get('update_id', 'N/A')}.")
+        return Response(status_code=200)
+    except Exception as e:
+        logger.error(f"Error processing update {json_data.get('update_id', 'N/A')}: {e}", exc_info=True)
+        return Response(status_code=500, content=f"Internal Server Error: {e}")
 
-# --- Основная асинхронная функция для запуска бота ---
-async def main():
-    global application
-    token = os.getenv("BOT_TOKEN")
-    if not token:
-        logger.critical("BOT_TOKEN environment variable is not set. Bot cannot start.")
-        raise ValueError("BOT_TOKEN environment variable is not set")
-    
-    # Инициализация базы данных
-    init_db()
-    
-    application = Application.builder().token(token).build()
-    await application.initialize()
-    
-    # --- Добавляем обработчики ---
-    # Обработчик для пересланных постов из канала
-    application.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.GROUPS, handle_forwarded_post_in_discussion))
-    # Обработчик для подсчёта сообщений в группе
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & filters.ChatType.GROUPS, count_messages))
-    # Обработчик для диапазона рандомайзера (должен быть перед handle_private_message)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_random_range))
-    # Обработчик для сообщений в личных чатах
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_private_message))
-    # Команды
-    application.add_handler(CommandHandler("site", site))
-    application.add_handler(CommandHandler("servers", servers))
-    application.add_handler(CommandHandler("partners", partners))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("ping", ping))
-    application.add_handler(CommandHandler("rank", rank))
-    application.add_handler(CommandHandler("random", random_command))
-    
-    port = int(os.getenv("PORT", 10000))
-    logger.info(f"Starting Uvicorn server on host 0.0.0.0 and port {port}")
-    config = uvicorn.Config(app, host="0.0.0.0", port=port)
-    server = uvicorn.Server(config)
-    await server.serve()
-
-if __name__ == "__main__":
-    asyncio.run(main())
