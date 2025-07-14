@@ -10,9 +10,6 @@ from telegram.ext import Application, MessageHandler, filters, CommandHandler, C
 from fastapi import FastAPI, Request, Response
 from urllib.parse import quote
 
-# Очистка дефолтных заголовков requests
-requests.sessions.HTTPAdapter().default_headers.clear()
-
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -97,7 +94,8 @@ async def link_to_xenforo(forum_username: str, user_id: int, chat_id: str) -> bo
         return False
     try:
         headers = {
-            "XF-Api-Key": XENFORO_API_KEY
+            "XF-Api-Key": XENFORO_API_KEY,
+            "Accept": "application/json"
         }
         encoded_username = quote(forum_username)
         url = f"{XENFORO_API_URL}/users/find-name?name={encoded_username}"
