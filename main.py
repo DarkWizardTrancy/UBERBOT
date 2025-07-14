@@ -195,7 +195,7 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 
     try:
         await update.message.reply_text(
-            "Привет! Я бот PWDarksearh by PWISMYLIFE. Используй /help, чтобы узнать, что я умею."
+            "Привет! Я бот PWDarksearch by PWISMYLIFE. Используй /help, чтобы узнать, что я умею."
         )
         logger.info(f"Sent welcome message to user in chat_id {current_chat_id}")
     except Exception as e:
@@ -206,7 +206,7 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Received /start command from user {update.effective_user.id}")
     await update.message.reply_text(
-        "Привет! Я бот PWDarksearh by PWISMYLIFE. Я могу помочь с информацией, рангами и даже немного поиграть. "
+        "Привет! Я бот PWDarksearch by PWISMYLIFE. Я могу помочь с информацией, рангами и даже немного поиграть. "
         "Используй /help, чтобы увидеть список команд."
     )
 
