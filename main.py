@@ -206,14 +206,14 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Received /start command from user {update.effective_user.id}")
     await update.message.reply_text(
-        "Привет! Я бот для группы EdemPW. Я могу помочь с информацией, рангами и даже немного поиграть. "
+        "Привет! Я бот PWDarksearh by PWISMYLIFE. Я могу помочь с информацией, рангами и даже немного поиграть. "
         "Используй /help, чтобы увидеть список команд."
     )
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Received /info command from user {update.effective_user.id}")
     await update.message.reply_text(
-        "Я бот, созданный для поддержки сообщества EdemPW. "
+        "Я бот, созданный для поддержки сообщества PWISMYLIFE. "
         "Мои функции включают подсчёт сообщений, выдачу рангов, рандомайзер и предоставление полезных ссылок."
     )
 
