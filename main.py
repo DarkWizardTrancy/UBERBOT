@@ -66,13 +66,16 @@ async def post_to_xenforo(title: str, message: str, user_id: int, username: str)
         logger.error("XENFORO_API_KEY is not set.")
         return False
     try:
-        headers = {"XF-Api-Key": XENFORO_API_KEY}
+        headers = {
+            "XF-Api-Key": XENFORO_API_KEY,
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
         data = {
             "title": f"Post from Telegram: {title}",
             "message": f"{message}\n\nPosted by {username} (Telegram ID: {user_id})",
-            "node_id": XENFORO_FORUM_ID
+            "node_id": str(XENFORO_FORUM_ID)
         }
-        response = requests.post(f"{XENFORO_API_URL}/threads", headers=headers, json=data)
+        response = requests.post(f"{XENFORO_API_URL}/threads", headers=headers, data=data)
         response.raise_for_status()
         logger.info(f"Successfully posted to XenForo: {title}")
         return True
@@ -86,7 +89,10 @@ async def link_to_xenforo(forum_username: str, user_id: int, chat_id: str) -> bo
         logger.error("XENFORO_API_KEY is not set.")
         return False
     try:
-        headers = {"XF-Api-Key": XENFORO_API_KEY}
+        headers = {
+            "XF-Api-Key": XENFORO_API_KEY,
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
         response = requests.get(f"{XENFORO_API_URL}/users/find-name?name={forum_username}", headers=headers)
         response.raise_for_status()
         user_data = response.json()
@@ -94,8 +100,10 @@ async def link_to_xenforo(forum_username: str, user_id: int, chat_id: str) -> bo
             logger.info(f"User {forum_username} not found from chat_id {chat_id}")
             return False
         forum_user_id = user_data["user"]["user_id"]
-        data = {"custom_fields": {"telegram_id": str(user_id)}}
-        response = requests.post(f"{XENFORO_API_URL}/users/{forum_user_id}", headers=headers, json=data)
+        data = {
+            "custom_fields[telegram_id]": str(user_id)
+        }
+        response = requests.post(f"{XENFORO_API_URL}/users/{forum_user_id}", headers=headers, data=data)
         response.raise_for_status()
         logger.info(f"Linked Telegram ID {user_id} to forum user {forum_username} (ID: {forum_user_id})")
         return True
